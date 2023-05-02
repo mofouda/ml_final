@@ -1,0 +1,227 @@
+---
+title: "ml_final"
+author: "Mohammad"
+date: "2023-05-01"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(randomForest)
+library(caret)
+library(rpart.plot)
+library(rpart)
+library(e1071)
+
+knitr::opts_chunk$set(
+	echo = TRUE,
+	warning = FALSE,
+	fig.width = 8, 
+  fig.height = 6,
+  out.width = "90%")
+```
+
+## Option 2: The exposome dataset
+
+### Research Question
+
+Can environmental exposures be used to predict asthma diagnosis in children 6-11 years old? 
+
+#### Rationale 
+
+Asthma is a major noncommunicable disease that affect both children and adults but is more exacerbated in children particularly in middle and low-income countries where it's often under-diagnosed. Approximately 25 million are diagnosed with Asthma in the US alone. It's associated with increased healthcare costs, increased missed school days, and physician's visits. Environmental exposures are believed to be a detrimental factor in asthma development. Intensity and scale of environmental pollutants and chemical contaminants in both foods and water are on the rise. However, many are not extensively studied and their interactions with genetic and socioeconomic factors are not well understood. Data-driven approaches could provide a flexible and efficient methods to produce predicts on asthma diagnosis that can have implication on policy development, resources allocations, and future research. 
+
+### Data preparation
+
+First we load the `exposome` data file then merge `exposome` and `phenotype` data sets, then remove the `ID` variable. Next, we partition the data into training and testing data (70/30 split). We convert the asthma diagnosis outcome variable to factor. 
+
+```{r dataprep}
+#Load data using path of where file is stored
+load("/Users/mofouda/Desktop/Spring 23/Machine learning/Assignmets/fin_proj/ml_final/data/exposome.RData")
+
+#Merge all data frames into a single data frame
+studydata <- 
+    merge(exposome, phenotype, by="ID") %>% 
+    merge(covariates, by="ID") %>% 
+    select(-ID) %>% 
+    mutate(hs_asthma = factor(hs_asthma))
+
+#Partition data for use in demonstration
+set.seed(123)
+
+train.index <- 
+    studydata$hs_asthma %>% 
+    createDataPartition(p = 0.7, list = FALSE)
+
+train_df <- 
+    studydata[train.index, ]
+
+test_df <- 
+    studydata[-train.index, ]
+```
+
+### Data Exploration of Training Data
+
+In this step we perform some data exploration by providing some descriptive measures (for continuous measures: means and ranges, for categorical/binary: frequency counts), examining correlations between features, examine missingness.
+
+The `studydata` dataframe has 1301 observations and 241 features. In this step we examine the data structure, the outcome variable balance, missing data, and correlations between features. 
+
+```{r dataexplore}
+str(studydata)
+summary(studydata[, "hs_asthma"])
+
+#Descriptive statistics
+summaries <-
+    studydata %>% 
+    select(h_abs_ratio_preg_Log, hs_no2_dy_hs_h_Log, h_accesspoints300_preg_Log, 
+           hs_walkability_mean_h_None, h_Benzene_Log, h_NO2_Log, e3_alcpreg_yn_None, 
+           h_dairy_preg_Ter, h_meat_preg_Ter, h_pamod_t3_None, hs_cu_c_Log2, 
+           hs_pfoa_m_Log2, e3_asmokcigd_p_None, hs_pet_None, h_trafnear_preg_pow1over3,
+           hs_wgtgain_None, hs_oxbe_madj_Log2, hs_cotinine_mcat_None, h_bro_preg_Log, 
+           e3_sex_None, h_edumc_None, hs_child_age_None,hs_asthma, hs_zbmi_who, hs_Gen_Tot, 
+           e3_bw, hs_asthma) %>% 
+    summary()
+
+summaries
+
+#Examine Missingness
+Amelia::missmap(studydata)
+
+
+#Examine correlations between features
+cor_studydata <-
+    studydata %>% 
+    select(where(is.numeric)) %>% 
+    cor(use = "complete.obs") %>% 
+    findCorrelation(cutoff=0.4)
+```
+
+Based on feature summaries including the outcome, we will need to center and scale the training data (variables have different means) and outcome is imbalanced requiring choosing an appropriate sampling method. In this case "up" sampling would be more appropriate. 
+
+
+### Models to address research question
+
+Using a random forest algorithm to train the model for feature selection. We can get the most important variable in predicting the asthma diagnosis in children aged 6-11 years. We can then use this data to allocate resources, design interventions and inform policy. Identified environmental exposures of concern can further investigated. We will then compare the performance of this algorithm with two others; LASSO and support vector classifier with the goal of finding the "optimal model". Accuracy, and sensitivity will be used to evaluate model performance since it's important that the model accurately predicts positive outcome. 
+
+#### Random Forest
+
+This code chunk uses different combinations of the features in the `studydata` dataset to train the model. Varying number of trees could be used in a function to train the model to get the best model. However, computational capacity is a limitation that significantly increases model run time (sometimes indefinitely on my personal laptop). As a result, we restrict to the maximum number of trees to 200 only. We use Accuracy to evaluate the model since this is a classification problem. 
+
+
+```{r random forest}
+# Try mtry of all, half of all, sqrt of all features 
+mtry <- 
+    c(ncol(train_df)-1, sqrt(ncol(train_df)-1), 0.5*ncol(train_df)-1)
+
+mtrygrid <- 
+    expand.grid(.mtry = round(mtry))
+
+control <- 
+    trainControl(method = "cv", number = 10, sampling = "up")
+
+set.seed(123)
+    rf <- 
+        train(hs_asthma ~., data = train_df, method = "rf", preProc=c("center", "scale"), 
+              trControl = control, metric = "Accuracy", tuneGrid = mtrygrid, importance = TRUE, ntree = 100)
+
+#get the best tune 
+rf$bestTune
+
+#Check model performance 
+confusionMatrix(rf)
+
+#Assess variable importance
+varImp(rf)
+rf$finalModel
+varImpPlot(rf$finalModel)
+```
+
+The model performance is relatively high (Accuracy = 0.89). However, the model is not very sensitive to predicting the positive outcom. The most important variables are: `hs_pm25_yr_hs_h_None` a postnatal outdoor pollutant, `hs_mn_c_Log2` Manganese postnatal exposure, `hs_dmtp_cadj_Log2` DTMP postnatal pesticide exposure, `s_dmp_cadj_Log2` also a pesticide, `hs_ndvi100_s_None ` an outdoor natural space exposure.     
+
+
+#### LASSO
+
+```{r}
+#Create grid to search lambda
+lambda <- 10^seq(-3, 3, length = 100)
+
+set.seed(123)
+
+lasso <-
+    train(hs_asthma ~., data = train_df, method = "glmnet", 
+          trControl = trainControl("cv", number = 10, sampling = "up"), 
+          preProc = c("center", "scale"), tuneGrid = expand.grid(alpha = 1, lambda = lambda))
+
+#Print the values of alpha and lambda that gave best prediction
+lasso$bestTune
+
+#Model performance
+confusionMatrix(lasso)
+
+#Get variable importance
+varImp(lasso)
+
+# Model coefficients
+coef(lasso$finalModel, lasso$bestTune$lambda)
+
+plot(lasso, xvar = "lambda", label = TRUE)
+```
+
+This model performs lower (Accuracy = 0.77). However, it's more sensitive in predicting the positive outcome. The most important variables include: `h_cohort` cohort of inclusion, `hs_hum_wk_hs_h_None` relative humidity postnatal exposure, and `hs_hum_wk_hs_h_log` NO2 postnatal exposure
+
+#### Support Vector Classifier
+
+In this model we tune the hyperparameter C using a grid and only 5 cross-validations instead of 10 to save runtime. The SVC is a computationally expensive algorithm 
+
+```{r}
+set.seed(123)
+
+control <- 
+    trainControl(method = "cv", number = 5, sampling = "up")
+
+set.seed(123)
+
+svc <- 
+    train(hs_asthma ~ ., data = train_df, method = "svmLinear", trControl= control, 
+          preProcess = c("center", "scale"), tuneGrid = expand.grid(C = seq(0.0001,100, length = 10)))
+
+#print the best tune
+svc$bestTune
+
+#Check variable importance
+varImp(svc)
+
+plot(svc)
+
+#check final model
+svc$finalModel
+
+#Model performance
+confusionMatrix(svc)
+```
+
+Similar to LASSO, this SVC model has an accuracy = 0.77 and is more sensitive to predicting the positive outcome compared to random forest. The most important variables are: `h_popdens_preg_Sqrt` population density at pregnancy, `h_ndvi100_preg_None` average NDVI values, `h_builtdens300_preg_Sqrt` building density during pregnancy, `hs_hg_m_Log2` mercury exposure during pregnancy, `hs_KIDMED_None` a lifestyle postnatal exposure. 
+
+Based on both the accuracy alone, random forest would be a better model. However, it failed in predicting the outcome of interest. In contrast, LASSO and SVC algorithms had similar lower accuracy but were more sensitive to outcome predictions. Given the flexibility of SVC, it would be more efficient to choose as the "optimal model". An advantage of SVC in this project is its ability to detect non-linearities which can be important in a dataset like the `exposome`. 
+
+### Model Evaluation in test
+
+We then use the model to evaluate the performance in the test dataset. 
+
+```{r evaluation}
+set.seed(123)
+
+#Make predictions in test set
+predictions <- predict(svc, test_df)
+
+#Get evaluation metrics from test set
+confusionMatrix(predictions, test_df$hs_asthma, positive = "1")
+```
+
+
+#### Limitations and Ethical considerations
+
+One analytic limitation of this project is the limited ability to make generalization and extrapolations outside the dataset used to train the model. The predictions are as good as the data. Another is the limited ability to filer the data by exposure family, period, or location, or covariate type (e.g., child, maternal). My initial research question was aimed at maternal environmental exposure. However, due to the nature of the dataset, this process would have been time-consuming and perhaps unattainable. 
+
+One ethical consideration is the risk of introducing biased predictions. Asthma is a disease that disproportionately impact children from low-income communities (the number of black children diagnosed with asthma in the US are approximately twice as much as white children). The resulting predictions could have a strong impact on policies and resource allocation. 
+
