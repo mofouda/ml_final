@@ -1,6 +1,12 @@
 ---
 title: "ml_final"
 author: "Mohammad"
+date: "2023-05-02"
+output: html_document
+---
+---
+title: "ml_final"
+author: "Mohammad"
 date: "2023-05-01"
 output: github_document
 ---
@@ -223,4 +229,5 @@ confusionMatrix(predictions, test_df$hs_asthma, positive = "1")
 One analytic limitation of this project is the limited ability to make generalization and extrapolations outside the dataset used to train the model. The predictions are as good as the data. Another is the limited ability to filer the data by exposure family, period, or location, or covariate type (e.g., child, maternal). My initial research question was aimed at maternal environmental exposure. However, due to the nature of the dataset, this process would have been time-consuming and perhaps unattainable. 
 
 One ethical consideration is the risk of introducing biased predictions. Asthma is a disease that disproportionately impact children from low-income communities (the number of black children diagnosed with asthma in the US are approximately twice as much as white children). The resulting predictions could have a strong impact on policies and resource allocation. 
+
 
